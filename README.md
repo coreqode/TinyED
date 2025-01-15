@@ -1,2 +1,2 @@
 # TinyED
-A Tiny Library for Energy Derivatives.
+A Tiny Header-Only Library for Energy Derivatives.
