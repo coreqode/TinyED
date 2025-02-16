@@ -13,8 +13,8 @@ public:
     virtual double getEnergy(int idx, const std::vector<VectorXd>& x) const = 0;
     virtual VectorXd getForce(int idx, const std::vector<VectorXd>& x) const = 0;
     virtual MatrixXd getForceJacobian(int idx, const std::vector<VectorXd>& x) const = 0;
-    // virtual MatrixXd compute_dS(int idx, const std::vector<VectorXd>& x) const = 0;
-    // virtual int nonRigidDofs() const = 0;
+    virtual VectorXd compute_dS(int idx, const std::vector<VectorXd>& x) const = 0;
+    virtual int nonRigidDofs() const = 0;
     virtual int totalConstraints() const = 0;
 
     double getTotalEnergy(const std::vector<VectorXd>& x) const {
@@ -128,20 +128,23 @@ class SpringModel : public EnergyModel {
           jacobian.bottomRightCorner(dim, dim) = mat;
           return jacobian;
       }
+    VectorXd compute_dS(int idx, const std::vector<VectorXd>& x) const override {
+        const auto& [i, j] = constraints[idx];
+        VectorXd x21 = x[i] - x[j];
+        double cur_length = x21.norm();
+        VectorXd x21_cap = x21 / cur_length;
+        VectorXd dS(2 * dim);
+        dS << x21_cap, -x21_cap;
+        return dS;
+    }
+
+    // Return the number of non-rigid degrees of freedom
+    int nonRigidDofs() const override {
+ 
+        return 1;
+    }
   
-      // VectorXd compute_dS(int idx, const std::vector<VectorXd>& x) const override {
-      //     // Implement the computation of dS based on your specific requirements.
-      //     // Placeholder implementation:
-      //     return VectorXd::Zero(dim);
-      // }
-  
-      // int non_rigid_dofs() const override {
-      //     // Return the number of non-rigid degrees of freedom.
-      //     // Placeholder implementation:
-      //     return 0;
-      // }
-  
-      int totalConstraints() const override {
+    int totalConstraints() const override {
           return static_cast<int>(constraints.size());
       }
   };
