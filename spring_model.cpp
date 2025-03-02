@@ -115,19 +115,32 @@ class SpringModel : public EnergyModel {
       }
   
       MatrixXd getForceJacobian(int idx, const std::vector<VectorXd>& x) const override {
-          const auto& [i, j] = constraints[idx];
-          VectorXd x21 = x[j] - x[i];
-          double cur_length = x21.norm();
-          double rest_length = data[idx].rest_length;
-          MatrixXd x21x21Dyadic = x21 * x21.transpose();
-          MatrixXd mat = -data[idx].stiffness * (MatrixXd::Identity(dim, dim) - x21x21Dyadic / (cur_length * cur_length)) * (1 - rest_length / cur_length);
-          MatrixXd jacobian = MatrixXd::Zero(2 * dim, 2 * dim);
-          jacobian.topLeftCorner(dim, dim) = mat;
-          jacobian.topRightCorner(dim, dim) = -mat;
-          jacobian.bottomLeftCorner(dim, dim) = -mat;
-          jacobian.bottomRightCorner(dim, dim) = mat;
-          return jacobian;
-      }
+        const auto& [i, j] = constraints[idx];
+        VectorXd x21 = x[j] - x[i];
+        double cur_length = x21.norm();
+        double rest_length = data[idx].rest_length;
+        
+        // Normalize x21 before computing the dyadic product
+        VectorXd x21_normalized = x21 / cur_length;
+        MatrixXd x21x21Dyadic = x21_normalized * x21_normalized.transpose(); 
+    
+        // Compute stiffness matrix following Python’s logic
+        MatrixXd mat = -data[idx].stiffness * (
+            (1 - rest_length / cur_length) * (MatrixXd::Identity(dim, dim) - x21x21Dyadic) 
+            + x21x21Dyadic
+        );
+    
+        // Construct the full Jacobian matrix
+        MatrixXd jacobian(2 * dim, 2 * dim);
+        jacobian.topLeftCorner(dim, dim) = mat;
+        jacobian.topRightCorner(dim, dim) = -mat;
+        jacobian.bottomLeftCorner(dim, dim) = -mat;
+        jacobian.bottomRightCorner(dim, dim) = mat;
+    
+        return jacobian;
+    }
+    
+      
     VectorXd compute_dS(int idx, const std::vector<VectorXd>& x) const override {
         const auto& [i, j] = constraints[idx];
         VectorXd x21 = x[i] - x[j];
@@ -153,35 +166,109 @@ class SpringModel : public EnergyModel {
 void printMatrix(const MatrixXd& mat, const std::string& label) {
   std::cout << label << ":\n" << mat << "\n\n";
 }
+// Function for numerical differentiation
+VectorXd numericalGradient(std::function<double(const std::vector<VectorXd>&)> func, std::vector<VectorXd>& x, double eps = 1e-5) {
+    VectorXd grad(x.size() * x[0].size());
+    int dim = x[0].size();
+ 
+    for (size_t i = 0; i < x.size(); ++i) {
+        for (int j = 0; j < dim; ++j) {
+            x[i][j] += eps;
+            double E_plus = func(x);
+            x[i][j] -= 2 * eps;
+            double E_minus = func(x);
+            x[i][j] += eps;
+            grad[i * dim + j] = (E_plus - E_minus) / (2 * eps);
+        }
+    }
+    return grad;
+}
 
-int main() {
-  std::vector<VectorXd> rest_vertices = {
-      VectorXd::Zero(2),
-      (VectorXd(2) << 1.0, 0.0).finished()
-  };
+// Function for numerical Jacobian
+MatrixXd numericalJacobian(std::function<VectorXd(const std::vector<VectorXd>&)> func, std::vector<VectorXd>& x, double eps = 1e-5) {
+    int dim = x[0].size();
+    VectorXd f0 = func(x);
+    MatrixXd J(f0.size(), f0.size());
+    
+    for (size_t i = 0; i < x.size(); ++i) {
+        for (int j = 0; j < dim; ++j) {
+            x[i][j] += eps;
+            VectorXd f_plus = func(x);
+            
+            x[i][j] -= 2 * eps;
+            VectorXd f_minus = func(x);
+            x[i][j] += eps;
+            J.col(i * dim + j) = (f_plus - f_minus) / (2 * eps);
+            
+            std::cout<<"fplus"<<f_plus<<"\n";
+            std::cout<<"f_minus"<<f_minus<<"\n";
 
-  std::vector<std::pair<int, int>> constraints = {{0, 1}};
-  double stiffness = 10.0;
-  SpringModel model(rest_vertices, constraints, stiffness);
+            std::cout<<"huh"<<(f_plus - f_minus)<<"\n";
+            std::cout << "Jacobian column " << (i * dim + j) << ":\n" << J.col(i * dim + j) << "\n\n";
+        }
+    }
+    return J;
+}
+// int main() {
+//   std::vector<VectorXd> rest_vertices = {
+//       VectorXd::Zero(2),
+//       (VectorXd(2) << 1.0, 0.0).finished()
+//   };
 
-  std::vector<VectorXd> x = {
-      VectorXd::Zero(2),
-      (VectorXd(2) << 1.2, 0.0).finished()
-  };
+//   std::vector<std::pair<int, int>> constraints = {{0, 1}};
+//   double stiffness = 10.0;
+//   SpringModel model(rest_vertices, constraints, stiffness);
 
-  double energy = model.getEnergy(0, x);
-  VectorXd force = model.getForce(0, x);
-  MatrixXd jacobian = model.getForceJacobian(0, x);
+//   std::vector<VectorXd> x = {
+//       VectorXd::Zero(2),
+//       (VectorXd(2) << 1.2, 0.0).finished()
+//   };
 
-  // Reshape the force vector into a 2x2 matrix
-  MatrixXd forceMatrix = Map<MatrixXd>(force.data(), 2, 2);
+//   double energy = model.getEnergy(0, x);
+//   VectorXd force = model.getForce(0, x);
+//   MatrixXd jacobian = model.getForceJacobian(0, x);
 
-  // Display results in matrix-like format
-  std::cout << "\n================ Spring Model Results ================\n";
-  std::cout << "Spring 0 Energy: " << std::fixed << std::setprecision(4) << energy << " J\n\n";
+//   // Reshape the force vector into a 2x2 matrix
+//   MatrixXd forceMatrix = Map<MatrixXd>(force.data(), 2, 2);
+
+//   // Display results in matrix-like format
+//   std::cout << "\n================ Spring Model Results ================\n";
+//   std::cout << "Spring 0 Energy: " << std::fixed << std::setprecision(4) << energy << " J\n\n";
   
-  printMatrix(forceMatrix, "Force exerted by spring 0");
-  printMatrix(jacobian, "Force Jacobian (stiffness matrix) of spring 0");
+//   printMatrix(forceMatrix, "Force exerted by spring 0");
+//   printMatrix(jacobian, "Force Jacobian (stiffness matrix) of spring 0");
 
-  return 0;
+//   return 0;
+// }
+int main() {
+    std::vector<VectorXd> rest_vertices = {
+        VectorXd::Zero(2),
+        (VectorXd(2) << 1.0, 0.0).finished()
+    };
+
+    std::vector<std::pair<int, int>> constraints = {{0, 1}};
+    double stiffness = 10.0;
+    SpringModel model(rest_vertices, constraints, stiffness);
+
+    std::vector<VectorXd> x = {
+        VectorXd::Zero(2),
+        (VectorXd(2) << 1.2, 0.0).finished()
+    };
+
+    // Analytical computations
+    double energy = model.getEnergy(0, x);
+    VectorXd force = model.getForce(0, x);
+    MatrixXd jacobian = model.getForceJacobian(0, x);
+
+    // Numerical tests
+    VectorXd numerical_force = -numericalGradient([&](const std::vector<VectorXd>& x) { return model.getEnergy(0, x); }, x);
+    MatrixXd numerical_jacobian = numericalJacobian([&](const std::vector<VectorXd>& x) { return model.getForce(0, x); }, x);
+
+    std::cout << "\n================ Derivative Test Results ================\n";
+    std::cout << "Analytical Force: \n" << force.transpose() << "\n";
+    std::cout << "Numerical Force: \n" << numerical_force.transpose() << "\n\n";
+    std::cout << "Analytical Jacobian: \n" << jacobian << "\n";
+    std::cout << "Numerical Jacobian: \n" << numerical_jacobian << "\n";
+
+    return 0;
 }
