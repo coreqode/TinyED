@@ -79,79 +79,6 @@ public:
     //     return {totalForce, totalForceJacobian};
     // }
 };
-// struct SpringData {
-//   double rest_length;
-//   double stiffness;
-// };
-// class SpringModel : public EnergyModel {
-//   private:
-//       std::vector<SpringData> data;
-//       std::vector<std::pair<int, int>> constraints;
-//       int dim;
-  
-//   public:
-//       SpringModel(const std::vector<VectorXd>& rest_vertices, const std::vector<std::pair<int, int>>& constraints, double k)
-//           : constraints(constraints), dim(rest_vertices[0].size()) {
-//           for (const auto& edge : constraints) {
-//               double rest_length = (rest_vertices[edge.first] - rest_vertices[edge.second]).norm();
-//               data.push_back({rest_length, k});
-//           }
-//       }
-  
-//       double getEnergy(int idx, const std::vector<VectorXd>& x) const override {
-//           const auto& [i, j] = constraints[idx];
-//           double cur_length = (x[i] - x[j]).norm();
-//           double rest_length = data[idx].rest_length;
-//           return 0.5 * data[idx].stiffness * std::pow(cur_length - rest_length, 2);
-//       }
-  
-//       VectorXd getForce(int idx, const std::vector<VectorXd>& x) const override {
-//           const auto& [i, j] = constraints[idx];
-//           VectorXd x21 = x[j] - x[i];
-//           double cur_length = x21.norm();
-//           double force_magnitude = data[idx].stiffness * (cur_length - data[idx].rest_length);
-//           VectorXd force = force_magnitude * (x21 / cur_length);
-//           VectorXd forces(2 * dim);
-//           forces << force, -force;
-//           return forces;
-//       }
-  
-//       MatrixXd getForceJacobian(int idx, const std::vector<VectorXd>& x) const override {
-//           const auto& [i, j] = constraints[idx];
-//           VectorXd x21 = x[j] - x[i];
-//           double cur_length = x21.norm();
-//           double rest_length = data[idx].rest_length;
-//           MatrixXd x21x21Dyadic = x21 * x21.transpose();
-//           MatrixXd mat = -data[idx].stiffness * (MatrixXd::Identity(dim, dim) - x21x21Dyadic / (cur_length * cur_length)) * (1 - rest_length / cur_length);
-//           MatrixXd jacobian = MatrixXd::Zero(2 * dim, 2 * dim);
-//           jacobian.topLeftCorner(dim, dim) = mat;
-//           jacobian.topRightCorner(dim, dim) = -mat;
-//           jacobian.bottomLeftCorner(dim, dim) = -mat;
-//           jacobian.bottomRightCorner(dim, dim) = mat;
-//           return jacobian;
-//       }
-//     VectorXd compute_dS(int idx, const std::vector<VectorXd>& x) const override {
-//         const auto& [i, j] = constraints[idx];
-//         VectorXd x21 = x[i] - x[j];
-//         double cur_length = x21.norm();
-//         VectorXd x21_cap = x21 / cur_length;
-//         VectorXd dS(2 * dim);
-//         dS << x21_cap, -x21_cap;
-//         return dS;
-//     }
-
-//     // Return the number of non-rigid degrees of freedom
-//     int nonRigidDofs() const override {
- 
-//         return 1;
-//     }
-  
-//     int totalConstraints() const override {
-//           return static_cast<int>(constraints.size());
-//       }
-//   };
-
-
 
 
 //fem_model.cpp  
@@ -384,42 +311,39 @@ class StVKModel : public FemModel {
 };
 
 int main() {
-    // Create example vertices for the models
-    std::vector<Eigen::VectorXd> vertices;
-
-    // 2D example with 3 vertices (for a simple 2D spring model or FEM model)
-    Eigen::Vector3d v1, v2, v3;
+    // Define initial vertex positions using VectorXd (dynamic size)
+    Eigen::VectorXd v1(3), v2(3), v3(3);
     v1 << 0.0, 0.0, 0.0;
     v2 << 1.0, 0.0, 0.0;
     v3 << 0.5, 1.0, 0.5;
-    
-    vertices.push_back(v1);
-    vertices.push_back(v2);
-    vertices.push_back(v3);
-    // Constraints for the SpringModel (edges between vertices)
-    std::vector<std::pair<int, int>> springConstraints = {{0, 1}, {1, 2}, {2, 0}};
-    
-    // Create SpringModel
-    // SpringModel springModel(vertices, springConstraints, 10.0); // Stiffness value (k = 10)
 
-    // Test SpringModel methods
-    // std::cout << "Spring Model Energy: " << springModel.getTotalEnergy(vertices) << std::endl;
+    std::vector<Eigen::VectorXd> vertices = {v1, v2, v3};
 
-    // Create constraints for FEM models (simple triangular element with 3 nodes)
+    // Constraints for the FEM model (simple triangular element)
     std::vector<std::vector<int>> femConstraints = {{0, 1, 2}};
-    // Young's modulus and Poisson's ratio (simple material properties)
+
+    // Material properties
     double youngsModulus = 200.0;
     double poissonRatio = 0.3;
-    
-    
-   
+
+    // Initialize StVK Model
     StVKModel stvkModel(vertices, femConstraints, poissonRatio, youngsModulus);
-   
-    // Test StVKModel methods
-    std::cout << "StVK Model Energy: " << stvkModel.getEnergy(0, vertices) << std::endl;
-    VectorXd stvk_force = stvkModel.getForce(0, vertices);
-    std::cout << "StVK Force:\n" << stvk_force << "\n";
-    MatrixXd stvk_jacobian = stvkModel.getForceJacobian(0, vertices);
-    std::cout << "StVK Jacobian:\n" << stvk_jacobian << "\n";
+
+    // Compute energy, force, and Jacobian before deformation
+    std::cout << "=== Before Deformation ===" << std::endl;
+    std::cout << "Energy: " << stvkModel.getEnergy(0, vertices) << std::endl;
+    std::cout << "Force:\n" << stvkModel.getForce(0, vertices) << "\n";
+    std::cout << "Jacobian:\n" << stvkModel.getForceJacobian(0, vertices) << "\n";
+
+    // Apply deformation (Modify the existing vertices)
+    vertices[1] += Eigen::VectorXd::Map((Eigen::Vector3d(0.3, 0.2, 0.1)).data(), 3);
+    vertices[2] += Eigen::VectorXd::Map((Eigen::Vector3d(-0.1, 0.4, -0.2)).data(), 3);
+
+    // Compute energy, force, and Jacobian after deformation
+    std::cout << "\n=== After Deformation ===" << std::endl;
+    std::cout << "Energy: " << stvkModel.getEnergy(0, vertices) << std::endl;
+    std::cout << "Force:\n" << stvkModel.getForce(0, vertices) << "\n";
+    std::cout << "Jacobian:\n" << stvkModel.getForceJacobian(0, vertices) << "\n";
+
     return 0;
 }
