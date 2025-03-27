@@ -1,0 +1,8 @@
+/Users/coreqode/work/TinyED/build/CMakeFiles/TinyED.dir
+/Users/coreqode/work/TinyED/build/CMakeFiles/edit_cache.dir
+/Users/coreqode/work/TinyED/build/CMakeFiles/rebuild_cache.dir
+/Users/coreqode/work/TinyED/build/extern/CMakeFiles/edit_cache.dir
+/Users/coreqode/work/TinyED/build/extern/CMakeFiles/rebuild_cache.dir
+/Users/coreqode/work/TinyED/build/examples/CMakeFiles/main.dir
+/Users/coreqode/work/TinyED/build/examples/CMakeFiles/edit_cache.dir
+/Users/coreqode/work/TinyED/build/examples/CMakeFiles/rebuild_cache.dir
