@@ -1,2 +1,0 @@
-// Contains Eigen? 
-// Contains TinyAD autodiff (ttps://github.com/patr-schm/TinyAD) for future
