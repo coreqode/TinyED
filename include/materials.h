@@ -2,7 +2,7 @@
 #define MATERIALS_H
 
 #include "common.h"
-
+#include "helpers.h"
 namespace TinyED
 {
     struct SpringModel {
@@ -75,9 +75,27 @@ namespace TinyED
 
     struct StVKModel
     {
-        static Real getEnergy(const VecS<9>& x, const Real area, const Real lambda, const Real mu)
+        static Real getEnergy(
+            const VecS<9>& positions,
+            const MatS<2,2>& invRestMat,
+            const Real restVolume,
+            const Real mu, const Real lambda) 
         {
-            return 0;
+            std::cout << "Calculating Energy...\n";
+        
+            // Compute Deformation Gradient
+            MatS<3,2> F;
+            computeDeformationGradient(positions, invRestMat, F);
+        
+            // Compute Green Strain
+            MatS<2,2> greenStrain = (F.transpose() * F - MatS<2,2>::Identity()) * 0.5;
+            std::cout << "Green Strain:\n" << greenStrain << std::endl;
+        
+            // Compute Energy
+            Real trace = greenStrain.trace();
+            Real energy = restVolume * (mu * greenStrain.squaredNorm() + lambda * 0.5 * trace * trace);
+        
+            return energy;
         }
 
         static void getForce(const VecS<9>& x, const Real area, const Real lambda, const Real mu, VecS<9>& force)
