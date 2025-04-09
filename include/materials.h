@@ -100,14 +100,14 @@ namespace TinyED
             return energy;
         }
       
-        static void get_stvk_stress(
+        static void getStress(
                 const Real mu, const Real lambda, const MatS<3, 2>& F, MatS<3, 2>& sigma)
         {
             MatS<2,2> greenStrain = (F.transpose() * F - MatS<2, 2>::Identity()) * 0.5;
             // St. Venant-Kirchhoff model
             sigma = F * (2 * mu * greenStrain + lambda * greenStrain.trace() * MatS<2,2>::Identity());
         }
-        static void get_stvk_Force(
+        static void getForce(
             const VecS<9>& x,
                 const MatS<2,2>& invRestMat,
                 const Real restVolume,
@@ -135,7 +135,7 @@ namespace TinyED
         // {
 
         // }
-        static void getstvkForceJacobians(
+        static void getForceJacobian(
             const VecS<9>& positions, 
             const MatS<2, 2>& invRestMat, 
             const Real volume, 
