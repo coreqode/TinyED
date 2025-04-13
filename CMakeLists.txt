@@ -20,7 +20,7 @@ message("Building TinyED in " ${CMAKE_BUILD_TYPE} " mode")
 file(GLOB_RECURSE TINYED_HEADERS ${PROJECT_SOURCE_DIR}/include/*.h)
 add_library(TinyED INTERFACE
         include/helpers.h)
-add_custom_target(TinyED-Headers SOURCES ${TINYED_HEEDERS}) # IDE shows TinyED headers in one place only
+      add_custom_target(TinyED-Headers SOURCES ${TINYED_HEADERS}) # IDE shows TinyED headers in one place only
 target_include_directories(TinyED INTERFACE ${PROJECT_SOURCE_DIR}/include )
 target_compile_options(TinyED INTERFACE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)
 target_link_libraries(TinyED INTERFACE Eigen3::Eigen)

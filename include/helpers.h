@@ -1,7 +1,8 @@
 #ifndef HELPERS_H
 #define HELPERS_H
-#include "common.h"
 #include <iostream>
+#include "common.h"
+
 namespace TinyED
 {
     void computeInvRestMat(const VecS<9>& rest_vertices , MatS<2, 2>& invRestMat) {
@@ -31,44 +32,33 @@ namespace TinyED
         invRestMat =  (X.transpose() * H).inverse();
 
         //print X and H too
-        std::cout << "Rest shape matrix X:\n" << X << std::endl;
-        std::cout << "Transformation matrix H:\n" << H << std::endl;
+        // std::cout << "Rest shape matrix X:\n" << X << std::endl;
+        // std::cout << "Transformation matrix H:\n" << H << std::endl;
        
     }
     
 
-    
-
     void computeDeformationGradient(
         const VecS<9>& positions, 
-        const MatS<2,2>& invRestMat, 
-        MatS<3,2>& F) 
+        const MatS<2,2>& invRestMat,
+        MatS<3,2>& B,
+        MatS<3,2>& F)
     {
-        MatS<3,2> B;
-        B << -1, -1,
-             1,  0,
-             0,  1;
-    
-        MatS<3,2> deformedCoordsToDeformationGradient = B * invRestMat;
+        const Mat32 H{
+            {-1, -1},
+            {1, 0},
+            {0, 1}
+        };
+
+        B = H * invRestMat;
+
         MatS<3,3> positionsMat;
     
         for(unsigned int p = 0; p < 3; p++) {
             positionsMat.col(p) = positions.segment(p * 3, 3);
         }
     
-        F = positionsMat * deformedCoordsToDeformationGradient;
-    
-        std::cout << "Deformation Gradient F:\n" << F << std::endl;
-    }
-
-    void computeAllForces()
-    {
-
-    }
-
-    void computeAllForceJacobians()
-    {
-
+        F = positionsMat * B;
     }
 
 

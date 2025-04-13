@@ -3,15 +3,31 @@
 
 #include "common.h"
 #include "helpers.h"
+#include <variant>
+
 namespace TinyED
 {
+    struct SpringData
+    {
+        Real rest_length;
+        Real k;
+    };
+
+    struct FEMTriData
+    {
+        Real mu;
+        Real lambda;
+        Real restVolume;
+        Mat2 invRestMat;
+    };
+
     struct SpringModel {
-        static Real getEnergy(const VecS<6> &x, const Real rest_length, const Real k) {
+        static inline Real getEnergy(const VecS<6> &x, const SpringData& data) {
             const Real l = (x.segment<3>(0) - x.segment<3>(3)).norm();
-            return 0.5 * k * (l - rest_length) * (l - rest_length);
+            return 0.5 * data.k * (l - data.rest_length) * (l - data.rest_length);
         }
     
-        static void getForce(const VecS<6> &x, const Real l0, const Real k, VecS<6> &force) {
+        static inline void getForce(const VecS<6> &x, const SpringData& data, VecS<6> &force) {
             VecS<3> x1 = x.segment<3>(0);
             VecS<3> x2 = x.segment<3>(3);
             VecS<3> x21 = x2 - x1;
@@ -19,17 +35,16 @@ namespace TinyED
     
             if (l < 1e-8) {
                 force.setZero();
-              
             }
     
-            Real force_magnitude = k * (l - l0);
+            Real force_magnitude = data.k * (l - data.rest_length);
             VecS<3> forceVec = force_magnitude * (x21 / l);
     
             force.segment<3>(0) = -forceVec; // Force on first point
             force.segment<3>(3) = forceVec;  // Force on second point
         }
     
-        static void get_dFdx(const VecS<6> &x, const Real l0, const Real k, MatS<3, 3> &dFdx) {
+        static inline void get_dFdx(const VecS<6> &x, const SpringData& data, MatS<3, 3> &dFdx) {
             VecS<3> x1 = x.segment<3>(0);
             VecS<3> x2 = x.segment<3>(3);
             VecS<3> x21 = x2 - x1;
@@ -42,12 +57,12 @@ namespace TinyED
     
             MatS<3, 3> I = MatS<3, 3>::Identity();
             MatS<3, 3> x_hat_x_hatT = (x21 * x21.transpose()) / (l * l);
-            dFdx = -k * ((1 - (l0 / l)) * (I - x_hat_x_hatT) + x_hat_x_hatT);
+            dFdx = -data.k * ((1 - (data.rest_length / l)) * (I - x_hat_x_hatT) + x_hat_x_hatT);
         }
     
-        static void getForceJacobian(const VecS<6> &x, const Real l0, const Real k, MatS<6, 6> &jacobian) {
+        static inline void getForceJacobian(const VecS<6> &x, const SpringData& data, MatS<6, 6> &jacobian) {
             MatS<3, 3> dFdx;
-            get_dFdx(x, l0, k, dFdx);
+            get_dFdx(x, data, dFdx);
     
             jacobian.block<3, 3>(0, 0) = dFdx;
             jacobian.block<3, 3>(3, 3) = dFdx;
@@ -55,7 +70,7 @@ namespace TinyED
             jacobian.block<3, 3>(3, 0) = -dFdx;
         }
     
-        static void getStress(const VecS<6> &x, const Real l0, const Real k, VecS<3> &stress) {
+        static inline void getStress(const VecS<6> &x, const SpringData& data, VecS<3> &stress) {
             VecS<3> x1 = x.segment<3>(0);
             VecS<3> x2 = x.segment<3>(3);
             VecS<3> x21 = x2 - x1;
@@ -66,8 +81,8 @@ namespace TinyED
                
             }
     
-            Real strain = (l - l0) / l0;
-            Real stress_magnitude = k * strain;
+            Real strain = (l - data.rest_length) / data.rest_length;
+            Real stress_magnitude = data.k * strain;
             stress = stress_magnitude * (x21 / l);
         }
     };
@@ -75,122 +90,103 @@ namespace TinyED
 
     struct StVKModel
     {
-        static Real getEnergy(
+        static inline Real getEnergy(
             const VecS<9>& positions,
-            const MatS<2,2>& invRestMat,
-            const Real restVolume,
-            const Real mu, const Real lambda) 
+            const FEMTriData& data)
         {
-            std::cout << "Calculating Energy...\n";
-        
             // Compute Deformation Gradient
             MatS<3,2> F;
-            MatS<3,2> deformedCoordsToDeformationGradient;
-            computeDeformationGradient(positions, invRestMat, deformedCoordsToDeformationGradient, F);
-         
-        
+            MatS<3,2> B;
+            computeDeformationGradient(positions, data.invRestMat, B, F);
+
             // Compute Green Strain
-            MatS<2,2> greenStrain = (F.transpose() * F - MatS<2,2>::Identity()) * 0.5;
-            std::cout << "Green Strain:\n" << greenStrain << std::endl;
-        
+            const MatS<2,2> greenStrain = (F.transpose() * F - MatS<2,
+            2>::Identity()) * 0.5;
+
             // Compute Energy
-            Real trace = greenStrain.trace();
-            Real energy = restVolume * (mu * greenStrain.squaredNorm() + lambda * 0.5 * trace * trace);
-        
+            const Real trace = greenStrain.trace();
+            const Real energy = data.restVolume * (data.mu * greenStrain.squaredNorm() +
+            data.lambda * 0.5 * trace * trace);
+
             return energy;
         }
-      
-        static void getStress(
-                const Real mu, const Real lambda, const MatS<3, 2>& F, MatS<3, 2>& sigma)
+
+        static inline void getStress(
+                const MatS<3, 2>& F, const FEMTriData& data, MatS<3, 2>& sigma)
         {
-            MatS<2,2> greenStrain = (F.transpose() * F - MatS<2, 2>::Identity()) * 0.5;
-            // St. Venant-Kirchhoff model
-            sigma = F * (2 * mu * greenStrain + lambda * greenStrain.trace() * MatS<2,2>::Identity());
+            const MatS<2,2> greenStrain = (F.transpose() * F - MatS<2, 2>::Identity()) * 0.5;
+            sigma = F * (2 * data.mu * greenStrain + data.lambda * greenStrain.trace() * MatS<2,2>::Identity());
         }
-        static void getForce(
+        static inline void getForce(
             const VecS<9>& x,
-                const MatS<2,2>& invRestMat,
-                const Real restVolume,
-                const Real mu, const Real lambda,
-                
+            const FEMTriData& data,
                 VecS<9>& force)
         {
+
+            MatS<3,2> B; B.setZero();
+            MatS<3,2> F; F.setZero();
+
+            computeDeformationGradient(x, data.invRestMat, B, F);
+
             MatS<3, 2> sigma;
+            getStress(F, data, sigma);
 
-            MatS<3,2> deformedCoordsToDeformationGradient;
-            MatS<3,2> F;
-
-            computeDeformationGradient(x, invRestMat, deformedCoordsToDeformationGradient, F);
-
-            get_stvk_stress(mu, lambda, F, sigma);
-            
-            auto force_map = Eigen::Map<MatS<3, 3>>(reinterpret_cast<Real*>(force.data())); 
-            force_map = sigma * deformedCoordsToDeformationGradient.transpose() * restVolume;
+            auto force_map = Eigen::Map<MatS<3, 3>>(reinterpret_cast<Real*>(force.data()));
+            force_map = sigma * B.transpose() * data.restVolume;
             force = -force;
         }
 
-
-        // static void getstvkForceJacobian(const VecS<9>& x, const Real area, const Real lambda, const Real mu, MatS<9, 9>&
-        // force)
-        // {
-
-        // }
-        static void getForceJacobian(
-            const VecS<9>& positions, 
-            const MatS<2, 2>& invRestMat, 
-            const Real volume, 
-            const Real mu, 
-            const Real lambda, 
-            VecS<9>& force, 
+        static inline void getForceJacobian(
+            const VecS<9>& positions,
+            const FEMTriData& data,
             MatS<9, 9>& forcesPositionDeriv)
         {
-            get_stvk_Force(positions, invRestMat, volume, mu, lambda,  force);
-        
-            MatS<3, 2> deformedCoordsToDeformationGradient;
+            MatS<3, 2> B;
             MatS<3, 2> F;
-            computeDeformationGradient(positions, invRestMat, deformedCoordsToDeformationGradient, F);
-            const MatS<2, 3> BT = deformedCoordsToDeformationGradient.transpose();
+            computeDeformationGradient(positions, data.invRestMat, B, F);
+            const MatS<2, 3> BT = B.transpose();
             const MatS<2, 2> greenStrain = (F.transpose() * F - MatS<2, 2>::Identity()) * 0.5;
-        
+
             const Real greenStrainTrace = greenStrain.trace();
-            const Real lambdaGreenTrace = lambda * greenStrainTrace;
-        
+            const Real lambdaGreenTrace = data.lambda * greenStrainTrace;
+
             for (int s = 0; s < 2; s++) {
-                const Eigen::Block<MatS<3, 2>, 3, 1, true> delF_rsdelx_j = deformedCoordsToDeformationGradient.col(s);
-        
+                const Eigen::Block<MatS<3, 2>, 3, 1, true> delF_rsdelx_j = B.col(s);
+
                 for (int l = 0; l < 2; l++) {
-                    Real delP_ildelF_rs_p1_cached = 2 * mu * greenStrain(s, l);
+                    Real delP_ildelF_rs_p1_cached = 2 * data.mu * greenStrain(s, l);
                     if (s == l) {
                         delP_ildelF_rs_p1_cached += lambdaGreenTrace;
                     }
-        
+
                     for (int r = 0; r < 3; r++) {
                         Real deltrEdelF_rs = F(r, s);
                         MatS<2, 1> delE_kldelF_rs_p1 = MatS<2, 1>::Zero();
-        
+
                         if (l == s) {
                             for (int k = 0; k < 2; k++) {
                                 delE_kldelF_rs_p1(k) = F(r, k);
                             }
                         }
-        
+
                         for (int i = 0; i < 3; i++) {
                             Real delP_ildelF_rs_p1 = (i == r) ? delP_ildelF_rs_p1_cached : 0.0;
                             Real delP_ildelF_rs_p2 = 0.0;
-        
+
                             if (l == s) {
-                                delP_ildelF_rs_p2 += mu * F.row(i).dot(delE_kldelF_rs_p1);
+                                delP_ildelF_rs_p2 += data.mu * F.row(i).dot(delE_kldelF_rs_p1);
                             }
-        
-                            delP_ildelF_rs_p2 += F(i, s) * mu * F(r, l);
-                            delP_ildelF_rs_p2 += F(i, l) * lambda * deltrEdelF_rs;
-        
+
+                            delP_ildelF_rs_p2 += F(i, s) * data.mu * F(r, l);
+                            delP_ildelF_rs_p2 += F(i, l) * data.lambda * deltrEdelF_rs;
+
                             Real delP_ildelF_rs = delP_ildelF_rs_p1 + delP_ildelF_rs_p2;
-        
+
                             for (int x = 0; x < 3; x++) {
                                 for (int y = 0; y < 3; y++) {
-                                    forcesPositionDeriv(i + 3 * x, r + 3 * y) += 
-                                        -volume * delP_ildelF_rs * delF_rsdelx_j(y) * deformedCoordsToDeformationGradient(x, l);
+                                    forcesPositionDeriv(i + 3 * x, r + 3 * y) +=
+                                        -data.restVolume * delP_ildelF_rs * delF_rsdelx_j(y) *
+                                        B(x, l);
                                 }
                             }
                         }
@@ -198,26 +194,21 @@ namespace TinyED
                 }
             }
         }
-        
-      
-};       
-     struct NeoHookeanModel
+};
+
+    enum MaterialType
     {
-        static Real getEnergy(const VecS<12>& x, const Real area, const Real lambda, const Real mu)
-        {
-            return 0;
-        }
+        SPRING,
+        STVK,
+        NEOHOOKEAN
+    };
 
-        static void getForce(const VecS<12>& x, const Real area, const Real lambda, const Real mu, VecS<12>& force)
-        {
+    using MaterialVariant = std::variant<SpringData, FEMTriData>;
 
-        }
-
-        static void getForceJacobian(const VecS<12>& x, const Real area, const Real lambda, const Real mu, MatS<12, 12>&
-        force)
-        {
-
-        }
+    struct Material
+    {
+        MaterialType type;
+        MaterialVariant data;
     };
 
 }
