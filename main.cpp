@@ -1,107 +1,59 @@
 #include <iostream>
-#include <vector>
-#include "Eigen/Dense"
-#include <iomanip>
-using namespace Eigen;
-// Abstract base class for energy models
-class EnergyModel {
-public:
-    virtual double getEnergy(int idx, const std::vector<VectorXd>& x) = 0;
-    virtual VectorXd getForce(int idx, const std::vector<VectorXd>& x) = 0;
-    virtual MatrixXd getForceJacobian(int idx, const std::vector<VectorXd>& x) = 0;
-    virtual ~EnergyModel() {}
-};
+#include "materials.h"
+#include "examples_util.h"
 
-struct SpringData {
-    double rest_length;
-    double stiffness;
-};
+using namespace TinyED;
+int main()
+{
+    constexpr int TOTAL_FRAMES = 500;
+    constexpr Real timeStep = 0.01;
+    constexpr Real density = 1.0;
+    constexpr int tesselation=8;
+    // const Vec3 gravity = {0, -9.81, 0};
+    const Vec3 gravity = {0, -9.81, 0};
 
-class SpringModel : public EnergyModel {
-private:
-    std::vector<SpringData> data;
-    std::vector<std::pair<int, int>> constraints;
-    int dim;
+    auto [triangles, positions, uvs] = generateTesselatedSquare({0, 0, 0}, tesselation, 1.0);
+    const std::vector<Mat2> restMatrices = computeRestShape(positions, uvs, triangles);
+    const std::vector<Real> restVolumes = computeRestVolume(uvs, triangles);
 
-public:
-    SpringModel(const std::vector<VectorXd>& rest_vertices, const std::vector<std::pair<int, int>>& constraints, double k)
-        : constraints(constraints), dim(rest_vertices[0].size()) {
-        for (const auto& edge : constraints) {
-            double rest_length = (rest_vertices[edge.first] - rest_vertices[edge.second]).norm();
-            data.push_back({rest_length, k});
-        }
+    std::vector<Material> matData(triangles.size());
+    std::vector<Element> elements(triangles.size());
+
+    for (size_t i = 0; i < triangles.size(); ++i)
+    {
+        matData[i].type = MaterialType::STVK;
+        matData[i].data = FEMTriData{};
+        std::get<FEMTriData>(matData[i].data).mu = 60;
+        std::get<FEMTriData>(matData[i].data).lambda = 90;
+        std::get<FEMTriData>(matData[i].data).restVolume = restVolumes[i];
+        std::get<FEMTriData>(matData[i].data).invRestMat = restMatrices[i];
+
+        elements[i].elementData = triangles[i];
     }
 
-    double getEnergy(int idx, const std::vector<VectorXd>& x) override {
-        const auto& [i, j] = constraints[idx];
-        double cur_length = (x[i] - x[j]).norm();
-        double rest_length = data[idx].rest_length;
-        return 0.5 * data[idx].stiffness * std::pow(cur_length - rest_length, 2);
+    std::vector<unsigned int> constraintIndices = {0, tesselation};
+
+    const VecN masses = computeVertexMasses(positions, triangles, density);
+    VecN invMasses = 1.0 / masses.array();
+
+    const int N = positions.cols();
+
+    Mat3N velocities(3, N);
+    velocities.setZero();
+
+
+    VecN invMlumped(3*N);
+    for (size_t i = 0; i < N; i++)
+    {
+        if (std::find(constraintIndices.begin(), constraintIndices.end(), i) != constraintIndices.end())
+            invMasses(i) = 0;
+        invMlumped.segment<3>(i*3).setConstant(invMasses(i));
     }
 
-    VectorXd getForce(int idx, const std::vector<VectorXd>& x) override {
-        const auto& [i, j] = constraints[idx];
-        VectorXd x21 = x[j] - x[i];
-        double cur_length = x21.norm();
-        double force_magnitude = data[idx].stiffness * (cur_length - data[idx].rest_length);
-        VectorXd force = force_magnitude * (x21 / cur_length);
-        VectorXd forces(2 * dim);
-        forces << force, -force;
-        return forces;
+    for (int frame = 0; frame < TOTAL_FRAMES; frame++)
+    {
+        advanceStep(positions, velocities, timeStep, elements, matData, invMlumped, masses, gravity);
+        const std::string filename = "frame_" + std::to_string(frame);
+        saveSheet(filename, positions, triangles);
     }
-
-    MatrixXd getForceJacobian(int idx, const std::vector<VectorXd>& x) override {
-        const auto& [i, j] = constraints[idx];
-        VectorXd x21 = x[j] - x[i];
-        double cur_length = x21.norm();
-        double rest_length = data[idx].rest_length;
-        MatrixXd x21x21Dyadic = x21 * x21.transpose();
-        MatrixXd mat = -data[idx].stiffness * (MatrixXd::Identity(dim, dim) - x21x21Dyadic / (cur_length * cur_length)) * (1 - rest_length / cur_length);
-        MatrixXd jacobian = MatrixXd::Zero(2 * dim, 2 * dim);
-        jacobian.topLeftCorner(dim, dim) = mat;
-        jacobian.topRightCorner(dim, dim) = -mat;
-        jacobian.bottomLeftCorner(dim, dim) = -mat;
-        jacobian.bottomRightCorner(dim, dim) = mat;
-        return jacobian;
-    }
-};
-
-
-
-// Function to print a 2D Eigen Matrix
-void printMatrix(const MatrixXd& mat, const std::string& label) {
-    std::cout << label << ":\n" << mat << "\n\n";
 }
-
-int main() {
-    std::vector<VectorXd> rest_vertices = {
-        VectorXd::Zero(2),
-        (VectorXd(2) << 1.0, 0.0).finished()
-    };
-
-    std::vector<std::pair<int, int>> constraints = {{0, 1}};
-    double stiffness = 10.0;
-    SpringModel model(rest_vertices, constraints, stiffness);
-
-    std::vector<VectorXd> x = {
-        VectorXd::Zero(2),
-        (VectorXd(2) << 1.2, 0.0).finished()
-    };
-
-    double energy = model.getEnergy(0, x);
-    VectorXd force = model.getForce(0, x);
-    MatrixXd jacobian = model.getForceJacobian(0, x);
-
-    // Reshape the force vector into a 2x2 matrix
-    MatrixXd forceMatrix = Map<MatrixXd>(force.data(), 2, 2);
-
-    // Display results in matrix-like format
-    std::cout << "\n================ Spring Model Results ================\n";
-    std::cout << "Spring 0 Energy: " << std::fixed << std::setprecision(4) << energy << " J\n\n";
-    
-    printMatrix(forceMatrix, "Force exerted by spring 0");
-    printMatrix(jacobian, "Force Jacobian (stiffness matrix) of spring 0");
-
-    return 0;
-}
-
